@@ -23,9 +23,29 @@ DEFAULT_MAX_N = 6
 DEFAULT_MIN_FREQUENCY = 3
 
 
+import re
+
+_SHEET_TAB_RE = re.compile(r"\[sheet_tab:(\d+)\]")
+
+
 def _tokenize(event: Event) -> str:
-    """Reduces an event to a compact symbol for sequence matching."""
-    return f"{event.application}:{event.event_type.value}"
+    """Reduces an event to a compact symbol for sequence matching.
+
+    For SPA internal-tab signals (e.g. Google Sheets worksheet tabs),
+    the tab identifier is folded into the token — so switching between
+    worksheets is treated as a distinct step, not silently merged with
+    plain APP_SWITCH. The rest of the (highly variable) window title
+    is intentionally excluded, or almost every window would look
+    unique and no pattern could ever repeat.
+    """
+    base = f"{event.application}:{event.event_type.value}"
+
+    if event.window:
+        match = _SHEET_TAB_RE.search(event.window)
+        if match:
+            return f"{base}:sheet_tab_{match.group(1)}"
+
+    return base
 
 
 def segment_into_sessions(
