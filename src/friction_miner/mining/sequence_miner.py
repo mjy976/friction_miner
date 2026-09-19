@@ -11,9 +11,11 @@ introduced (Master Instruction, section 21).
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from datetime import datetime
+from typing import List, Optional, Tuple
 
 from friction_miner.events.schema import Event
 
@@ -22,9 +24,6 @@ DEFAULT_MIN_N = 2
 DEFAULT_MAX_N = 6
 DEFAULT_MIN_FREQUENCY = 3
 
-
-import re
-
 _SHEET_TAB_RE = re.compile(r"\[sheet_tab:(\d+)\]")
 
 
@@ -32,11 +31,10 @@ def _tokenize(event: Event) -> str:
     """Reduces an event to a compact symbol for sequence matching.
 
     For SPA internal-tab signals (e.g. Google Sheets worksheet tabs),
-    the tab identifier is folded into the token — so switching between
-    worksheets is treated as a distinct step, not silently merged with
-    plain APP_SWITCH. The rest of the (highly variable) window title
-    is intentionally excluded, or almost every window would look
-    unique and no pattern could ever repeat.
+    the tab identifier is folded into the token. The rest of the
+    (highly variable) window title is intentionally excluded, or
+    almost every window would look unique and no pattern could ever
+    repeat.
     """
     base = f"{event.application}:{event.event_type.value}"
 
@@ -75,6 +73,9 @@ class PatternMatch:
     frequency: int
     avg_duration_seconds: float
     example_timestamps: List[str] = field(default_factory=list)
+    all_durations: List[float] = field(default_factory=list)
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
 
     @property
     def length(self) -> int:
@@ -91,10 +92,6 @@ def mine_patterns(
     """Counts repeated n-gram sequences across sessions, for n in
     [min_n, max_n]. Returns patterns occurring >= min_frequency times,
     sorted by longest + most frequent first.
-
-    Note: sub-sequences of a longer frequent pattern will naturally
-    also appear frequent — this is expected, not a bug. Phase 9
-    collapses these into single workflows.
     """
     sessions = segment_into_sessions(events, gap_seconds=session_gap_seconds)
     results: List[PatternMatch] = []
@@ -117,11 +114,16 @@ def mine_patterns(
                 continue
             durations = [(end - start).total_seconds() for start, end in spans]
             avg_duration = sum(durations) / len(durations)
+            all_starts = [start for start, _ in spans]
+            all_ends = [end for _, end in spans]
             results.append(PatternMatch(
                 sequence=seq,
                 frequency=len(spans),
                 avg_duration_seconds=avg_duration,
                 example_timestamps=[start.isoformat() for start, _ in spans[:3]],
+                all_durations=durations,
+                first_seen=min(all_starts),
+                last_seen=max(all_ends),
             ))
 
     results.sort(key=lambda p: (p.length, p.frequency), reverse=True)

@@ -16,14 +16,11 @@ not redundant fragments of the same behavior.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from datetime import datetime
+from typing import List, Optional, Tuple
 
 from friction_miner.mining.sequence_miner import PatternMatch
 
-# A sub-pattern is considered "the same workflow, seen at a shorter
-# window" if its frequency is within this fraction of its parent's
-# frequency. A sub-pattern occurring MUCH more often than any parent
-# is kept as its own independent workflow candidate instead.
 DEFAULT_FREQUENCY_TOLERANCE = 0.2
 
 
@@ -38,6 +35,9 @@ class WorkflowCandidate:
     avg_duration_seconds: float
     example_timestamps: List[str] = field(default_factory=list)
     absorbed_subpatterns: int = 0
+    all_durations: List[float] = field(default_factory=list)
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
 
     @property
     def step_count(self) -> int:
@@ -45,13 +45,23 @@ class WorkflowCandidate:
 
     @property
     def estimated_total_time_seconds(self) -> float:
-        """Rough total time spent on this workflow across all observed
-        occurrences (frequency x average duration per occurrence)."""
         return self.frequency * self.avg_duration_seconds
+
+    @property
+    def observed_span_days(self) -> float:
+        """Days between the first and last observed occurrence.
+        Floored at 1.0 — with a short observation window (e.g. a few
+        minutes of test data), extrapolating to a weekly rate without
+        this floor would produce wildly unrealistic numbers. This is
+        a known limitation: scores are most meaningful once real data
+        spans multiple days/weeks, not a single short session."""
+        if self.first_seen is None or self.last_seen is None:
+            return 1.0
+        days = (self.last_seen - self.first_seen).total_seconds() / 86400
+        return max(days, 1.0)
 
 
 def _is_contiguous_subsequence(shorter: Tuple[str, ...], longer: Tuple[str, ...]) -> bool:
-    """True if `shorter` appears as a contiguous slice of `longer`."""
     n, m = len(shorter), len(longer)
     if n > m:
         return False
@@ -62,13 +72,7 @@ def reconstruct_workflows(
     patterns: List[PatternMatch],
     frequency_tolerance: float = DEFAULT_FREQUENCY_TOLERANCE,
 ) -> List[WorkflowCandidate]:
-    """Collapses overlapping n-gram patterns into canonical workflow
-    candidates. See module docstring for the absorption rule."""
-
-    # Longest first, then most frequent — always anchor on the most
-    # complete picture of a workflow before considering its fragments.
     ordered = sorted(patterns, key=lambda p: (p.length, p.frequency), reverse=True)
-
     accepted: List[WorkflowCandidate] = []
 
     for pattern in ordered:
@@ -90,26 +94,20 @@ def reconstruct_workflows(
                 frequency=pattern.frequency,
                 avg_duration_seconds=pattern.avg_duration_seconds,
                 example_timestamps=list(pattern.example_timestamps),
+                all_durations=list(pattern.all_durations),
+                first_seen=pattern.first_seen,
+                last_seen=pattern.last_seen,
             ))
 
-    # Show the most impactful workflows first (frequency x step count
-    # is a simple proxy for "how much repeated activity this explains").
     accepted.sort(key=lambda w: w.frequency * w.step_count, reverse=True)
     return accepted
+
 
 def filter_meaningful_workflows(
     workflows: List[WorkflowCandidate],
     min_distinct_applications: int = 2,
 ) -> List[WorkflowCandidate]:
-    """Drops workflow candidates confined to a single application.
-
-    Single-app repeated navigation (e.g. clicking through folders in
-    File Explorer) tokenizes identically regardless of which folder
-    was visited, producing "patterns" that are statistical artifacts
-    of coarse tokenization, not real cross-app friction. The product
-    hypothesis (manual data transfer BETWEEN applications) requires
-    at least 2 distinct applications to be a valid candidate.
-    """
+    """Drops workflow candidates confined to a single application."""
     result = []
     for w in workflows:
         distinct_apps = {step.split(":", 1)[0] for step in w.steps}
