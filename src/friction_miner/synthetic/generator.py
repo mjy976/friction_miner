@@ -13,7 +13,7 @@ import random
 from datetime import datetime, timedelta
 from typing import List
 
-from friction_miner.events.schema import Event, EventType
+from friction_miner.events.schema import Event, EventType, EventSource
 
 
 def _make_event(
@@ -31,6 +31,7 @@ def _make_event(
         window=window,
         duration=duration,
         metadata=metadata or {},
+        source=EventSource.SYNTHETIC,
     )
 
 

@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from friction_miner.events.schema import Event, EventType
+from friction_miner.events.schema import Event, EventType, EventSource
 
 DEFAULT_DB_PATH = Path("data/friction_miner.db")
 
@@ -26,7 +26,6 @@ def _get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
-    """Creates the events table if it doesn't already exist."""
     conn = _get_connection(db_path)
     try:
         conn.execute(
@@ -34,13 +33,14 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
                 schema_version TEXT NOT NULL,
+                source TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
                 application TEXT NOT NULL,
                 event_type TEXT NOT NULL,
                 window TEXT,
                 duration REAL,
-                source TEXT,
-                destination TEXT,
+                transfer_source TEXT,
+                transfer_destination TEXT,
                 metadata TEXT NOT NULL
             )
             """
@@ -51,27 +51,27 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 
 
 def save_events(events: List[Event], db_path: Path = DEFAULT_DB_PATH) -> None:
-    """Persists a list of Event objects. Ignores duplicates (same event_id)."""
     conn = _get_connection(db_path)
     try:
         conn.executemany(
             """
             INSERT OR IGNORE INTO events (
-                event_id, schema_version, timestamp, application,
-                event_type, window, duration, source, destination, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_id, schema_version, source, timestamp, application,
+                event_type, window, duration, transfer_source, transfer_destination, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     e.event_id,
                     e.schema_version,
+                    e.source.value,
                     e.timestamp.isoformat(),
                     e.application,
                     e.event_type.value,
                     e.window,
                     e.duration,
-                    e.source,
-                    e.destination,
+                    e.transfer_source,
+                    e.transfer_destination,
                     json.dumps(e.metadata),
                 )
                 for e in events
@@ -87,7 +87,6 @@ def load_events(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
 ) -> List[Event]:
-    """Retrieves events, optionally filtered by a time range."""
     conn = _get_connection(db_path)
     try:
         query = "SELECT * FROM events"
@@ -111,20 +110,21 @@ def load_events(
         events = []
         for row in rows:
             (
-                event_id, schema_version, timestamp, application,
-                event_type, window, duration, source, destination, metadata,
+                event_id, schema_version, source, timestamp, application,
+                event_type, window, duration, transfer_source, transfer_destination, metadata,
             ) = row
             events.append(
                 Event(
                     event_id=event_id,
                     schema_version=schema_version,
+                    source=EventSource(source),
                     timestamp=datetime.fromisoformat(timestamp),
                     application=application,
                     event_type=EventType(event_type),
                     window=window,
                     duration=duration,
-                    source=source,
-                    destination=destination,
+                    transfer_source=transfer_source,
+                    transfer_destination=transfer_destination,
                     metadata=json.loads(metadata),
                 )
             )
