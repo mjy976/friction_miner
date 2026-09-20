@@ -93,7 +93,6 @@
   }
   .source-toggle input { margin-right: 6px; vertical-align: middle; }
 
-  /* Observe panel */
   .observe-panel {
     display: flex;
     flex-wrap: wrap;
@@ -184,7 +183,7 @@
     background: rgba(242, 169, 77, 0.06); border-radius: 20px; padding: 3px 10px;
   }
 
-  .actions { display: flex; gap: 16px; font-size: 13px; }
+  .actions { display: flex; gap: 16px; font-size: 13px; align-items: center; }
   .actions button, .actions .link-btn {
     background: none; border: none; padding: 0; font-family: var(--font-display);
     font-size: 13px; cursor: pointer; color: var(--verdigris-2);
@@ -260,6 +259,7 @@
 
 <script>
 const API_BASE = 'http://localhost:8000';
+const N8N_EXPORT_THRESHOLD = 0.6;
 
 const FACTORS = [
   { key: 'frequency',             label: 'Frequency',            color: 'var(--ember-1)' },
@@ -336,6 +336,7 @@ function renderCard(o) {
   }).join('');
 
   const tagsHtml = o.friction_types.map(t => `<span class="tag">${sentenceCase(t)}</span>`).join('');
+  const safeName = o.workflow_name.replace(/'/g, "\\'");
 
   let actionsHtml = '';
   if (o.validation_status === 'pending') {
@@ -344,8 +345,12 @@ function renderCard(o) {
       <button class="reject-btn" onclick="validate('${o.opportunity_id}', 'rejected')">Dismiss</button>
     `;
   } else if (o.validation_status === 'accepted') {
+    const exportBtn = o.automation_potential >= N8N_EXPORT_THRESHOLD
+      ? `<button class="link-btn" onclick="exportToN8n('${o.opportunity_id}', '${safeName}')">Export to n8n</button>`
+      : '';
     actionsHtml = `
       <span class="validated-badge">✓ Validated</span>
+      ${exportBtn}
       <button class="undo-btn" onclick="validate('${o.opportunity_id}', 'pending')">Undo</button>
     `;
   } else if (o.validation_status === 'rejected') {
@@ -415,6 +420,23 @@ async function validate(id, status) {
     loadAll();
   } catch (err) {
     showError(`Couldn't update that opportunity. (${err.message})`);
+  }
+}
+
+async function exportToN8n(id, workflowName) {
+  try {
+    const workflow = await fetchJSON(`/api/opportunities/${id}/n8n-export`);
+    const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${workflowName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.n8n.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showError(`Couldn't build the n8n export. (${err.message})`);
   }
 }
 

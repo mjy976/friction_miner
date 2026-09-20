@@ -1,9 +1,8 @@
 """
-FastAPI Backend — Phase 14b (+ collector control, dual-source pipeline)
+FastAPI Backend — Phase 14b (+ collector control, dual-source pipeline, n8n export)
 
 Thin HTTP layer over the existing pipeline modules. Contains NO
-business logic itself — every endpoint just calls into modules
-already built and tested in Phases 8-14a.
+business logic itself.
 """
 
 from __future__ import annotations
@@ -39,6 +38,7 @@ from friction_miner.sessions.store import (
     get_active_session,
     count_events_for_session,
 )
+from friction_miner.automation.n8n_export import build_n8n_workflow
 
 APP_DB_PATH = Path("data/friction_miner.db")
 SYNTHETIC_DB_PATH = Path("data/synthetic_events.db")
@@ -57,10 +57,6 @@ app.add_middleware(
 init_opportunities_db(APP_DB_PATH)
 init_sessions_db(APP_DB_PATH)
 
-# In-memory handle to the currently running collector subprocess.
-# Single-user, single active session at a time. Known limitation:
-# resets if the API process restarts — run uvicorn WITHOUT --reload
-# during real observation/demo use.
 _collector_process: Optional[subprocess.Popen] = None
 _collector_session_id: Optional[str] = None
 
@@ -70,7 +66,7 @@ class ValidationUpdateRequest(BaseModel):
 
 
 class RunPipelineRequest(BaseModel):
-    source: str = "real"  # "real" (accumulated collector data) or "synthetic" (demo dataset)
+    source: str = "real"
 
 
 @app.get("/api/opportunities", response_model=List[Opportunity])
@@ -103,15 +99,20 @@ def validate_opportunity(opportunity_id: str, body: ValidationUpdateRequest) -> 
     return {"opportunity_id": opportunity_id, "validation_status": body.status.value}
 
 
+@app.get("/api/opportunities/{opportunity_id}/n8n-export")
+def export_to_n8n(opportunity_id: str) -> dict:
+    """Returns an importable n8n workflow JSON skeleton for this
+    opportunity — a suggestion to review and wire up, never an
+    automatic deployment (Master Instruction, section 22)."""
+    opportunities = load_opportunities(APP_DB_PATH)
+    match = next((o for o in opportunities if o.opportunity_id == opportunity_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    return build_n8n_workflow(match)
+
+
 @app.post("/api/run-pipeline")
 def run_pipeline(body: RunPipelineRequest = RunPipelineRequest()) -> dict:
-    """Runs the full deterministic + LLM pipeline.
-
-    source="real": mines ALL accumulated real telemetry across every
-    observation session to date.
-    source="synthetic": always finds the same demo workflow, useful
-    when real data is too sparse to have a meaningful pattern yet.
-    """
     db_path = APP_DB_PATH if body.source == "real" else SYNTHETIC_DB_PATH
     init_db(db_path)
     events = load_events(db_path)
