@@ -24,7 +24,7 @@ Most "productivity AI" tools either require the user to manually describe their 
 
 ## Screenshot
 
-*(add a screenshot of the dashboard here — drag an image into this spot on GitHub, or reference `docs/screenshot.png`)*
+![Friction Miner Dashboard](docs/screenshot.png)
 
 ---
 
