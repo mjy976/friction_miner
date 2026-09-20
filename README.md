@@ -166,4 +166,4 @@ A few things that came up during development and shaped the final design:
 
 ## License
 
-*(add a license — MIT is a common choice for a portfolio project; see [choosealicense.com](https://choosealicense.com))*
+This project is licensed under the MIT License -- see [LICENSE](LICENSE) for details.
