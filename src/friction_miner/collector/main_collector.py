@@ -1,22 +1,27 @@
 """
-Unified Activity Collector — Phase 5 (Level 1 + Level 2 telemetry)
+Unified Activity Collector — Phase 5 (+ session tracking)
 
-Runs BOTH collectors concurrently in a single process, sharing one
-timeline and one thread-safe write buffer:
+Two ways to stop this process, both supported at once:
+  1. Ctrl+C in the terminal (manual/standalone use — unchanged).
+  2. A stop-file appearing on disk (checked once per second) — this is
+     how the FastAPI backend stops a collector it started on the
+     person's behalf from the dashboard's "Stop observing" button.
 
-  - WindowWatcher      -> APP_SWITCH events (foreground window polling)
-  - CopyPasteWatcher   -> COPY / PASTE events (global keyboard hook)
+Usage:
+    python -m friction_miner.collector.main_collector [session_id] [stop_file_path]
 
-Both feed into a single EventBuffer, which serializes all SQLite
-writes behind one lock — this avoids "database is locked" errors
-that could occur if two threads wrote at the exact same time.
+Both arguments are optional — running with no arguments behaves
+exactly as before (a random session_id, Ctrl+C to stop).
 """
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
+import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from pynput import keyboard
@@ -29,19 +34,19 @@ from friction_miner.storage.db import init_db, save_events
 POLL_INTERVAL_SECONDS = 1.0
 FLUSH_EVERY_N_EVENTS = 5
 CLIPBOARD_READ_DELAY_SECONDS = 0.15
+DEFAULT_STOP_FILE = Path("data/.collector_stop_signal")
 
 
 class EventBuffer:
-    """Thread-safe buffer shared across collectors. Guarantees only one
-    thread writes to SQLite at a time, and events from different
-    sources flush together on one consistent schedule."""
-
-    def __init__(self, flush_threshold: int = FLUSH_EVERY_N_EVENTS) -> None:
+    def __init__(self, session_id: str, flush_threshold: int = FLUSH_EVERY_N_EVENTS) -> None:
+        self._session_id = session_id
         self._lock = threading.Lock()
         self._pending: list[Event] = []
         self._flush_threshold = flush_threshold
+        self.total_saved = 0
 
     def add(self, event: Event) -> None:
+        event.session_id = self._session_id
         with self._lock:
             self._pending.append(event)
             if len(self._pending) >= self._flush_threshold:
@@ -54,12 +59,11 @@ class EventBuffer:
     def _flush_locked(self) -> None:
         if self._pending:
             save_events(self._pending)
+            self.total_saved += len(self._pending)
             self._pending.clear()
 
 
 class WindowWatcher:
-    """Polls the foreground window and emits APP_SWITCH events on change."""
-
     def __init__(self, buffer: EventBuffer) -> None:
         self._buffer = buffer
         self._stop_flag = threading.Event()
@@ -109,8 +113,6 @@ class WindowWatcher:
 
 
 class CopyPasteWatcher:
-    """Listens system-wide for Ctrl+C / Ctrl+V and emits COPY/PASTE events."""
-
     def __init__(self, buffer: EventBuffer) -> None:
         self._buffer = buffer
         self._ctrl_pressed = False
@@ -182,30 +184,39 @@ class CopyPasteWatcher:
             self._active_keys.discard(char)
 
 
-def run_collector() -> None:
+def run_collector(session_id: str, stop_file: Path) -> None:
     init_db()
-    buffer = EventBuffer()
+    buffer = EventBuffer(session_id)
 
     window_watcher = WindowWatcher(buffer)
     copy_paste_watcher = CopyPasteWatcher(buffer)
 
     window_thread = threading.Thread(target=window_watcher.run, daemon=True)
 
-    print("Friction Miner unified collector started. Press Ctrl+C to stop.\n")
+    print(f"Friction Miner collector started. session_id={session_id}")
+    print(f"Stop with Ctrl+C, or by creating: {stop_file}\n")
 
     window_thread.start()
     copy_paste_watcher.start()
 
     try:
         while True:
+            if stop_file.exists():
+                print("\nStop signal detected...")
+                break
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nStopping collector...")
+        print("\nStopping collector (Ctrl+C)...")
+    finally:
         window_watcher.stop()
         copy_paste_watcher.stop()
         buffer.flush()
-        print("All events saved. Goodbye.")
+        if stop_file.exists():
+            stop_file.unlink()
+        print(f"All events saved ({buffer.total_saved} total this session). Goodbye.")
 
 
 if __name__ == "__main__":
-    run_collector()
+    arg_session_id = sys.argv[1] if len(sys.argv) > 1 else str(uuid.uuid4())
+    arg_stop_file = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_STOP_FILE
+    run_collector(arg_session_id, arg_stop_file)

@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Friction Miner — Automation Opportunities</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #15130F;
+    --surface: #1E1B16;
+    --surface-2: #262019;
+    --border: #332C22;
+    --border-soft: #241F18;
+    --text: #F2EDE4;
+    --text-muted: #A79C89;
+    --text-faint: #726A5B;
+
+    --ember-1: #C9691A;
+    --ember-2: #E2841D;
+    --ember-3: #F2A94D;
+    --verdigris-1: #3D8C7E;
+    --verdigris-2: #6FB8AC;
+    --danger: #D9614F;
+
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+    --radius-sm: 3px;
+    --radius-md: 8px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: inherit; }
+  ::selection { background: var(--ember-2); color: #15130F; }
+  :focus-visible { outline: 2px solid var(--verdigris-2); outline-offset: 2px; }
+
+  .wrap { max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 24px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 24px;
+  }
+
+  .brand h1 { font-size: 28px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .brand p { margin: 0; color: var(--text-muted); font-size: 14.5px; max-width: 46ch; }
+
+  .status-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--verdigris-2); margin-right: 7px;
+    box-shadow: 0 0 0 3px rgba(111, 184, 172, 0.15);
+  }
+
+  .status-line { font-size: 12.5px; color: var(--text-faint); display: flex; align-items: center; margin-top: 10px; }
+
+  .run-panel { text-align: right; }
+
+  button.primary {
+    font-family: var(--font-display); font-size: 14.5px; font-weight: 500;
+    color: var(--bg); background: var(--ember-2); border: none;
+    padding: 11px 20px; border-radius: var(--radius-sm); cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button.primary:hover { background: var(--ember-3); }
+  button.primary:disabled { background: var(--surface-2); color: var(--text-faint); cursor: progress; }
+
+  .run-sub { display: block; margin-top: 8px; font-size: 12px; color: var(--text-faint); min-height: 16px; }
+
+  /* Observe panel */
+  .observe-panel {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
+    margin-bottom: 24px;
+  }
+
+  .observe-main { display: flex; align-items: center; gap: 14px; }
+
+  button.secondary {
+    font-family: var(--font-display); font-size: 13.5px; font-weight: 500;
+    color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  button.secondary:hover { border-color: var(--verdigris-1); }
+  button.secondary.recording { color: var(--bg); background: var(--ember-2); border-color: var(--ember-2); }
+  button.secondary:disabled { opacity: 0.6; cursor: progress; }
+
+  .observe-status { font-size: 12.5px; color: var(--text-faint); font-family: var(--font-mono); }
+
+  .rec-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ember-2); margin-right: 6px;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
+
+  .sessions-list {
+    font-size: 12px; color: var(--text-faint); font-family: var(--font-mono);
+    display: flex; gap: 16px; flex-wrap: wrap;
+  }
+
+  .overview { display: flex; flex-wrap: wrap; border: 1px solid var(--border-soft); margin-bottom: 40px; }
+  .stat { flex: 1 1 160px; padding: 18px 22px; border-right: 1px solid var(--border-soft); }
+  .stat:last-child { border-right: none; }
+  .stat .value { font-family: var(--font-mono); font-size: 26px; font-weight: 600; color: var(--text); }
+  .stat .label { font-size: 12.5px; color: var(--text-faint); margin-top: 4px; }
+
+  .section-heading { font-size: 14px; color: var(--text-muted); margin: 0 0 16px; }
+
+  .opportunities { display: flex; flex-direction: column; gap: 16px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--text-faint); border-radius: var(--radius-md);
+    padding: 22px 24px; opacity: 0; transform: translateY(6px);
+    animation: rise 0.4s ease forwards;
+  }
+  .card.status-accepted { border-left-color: var(--verdigris-1); }
+  .card.status-rejected { border-left-color: transparent; opacity: 0.5; }
+  @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .card { animation: none; opacity: 1; transform: none; } }
+
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+  .card-top h2 { font-size: 18px; margin: 0 0 8px; }
+  .card-top p.desc { margin: 0; color: var(--text-muted); font-size: 14px; max-width: 58ch; }
+
+  .score-block { text-align: right; flex-shrink: 0; }
+  .score-value { font-family: var(--font-mono); font-size: 32px; font-weight: 600; }
+  .score-max { font-size: 14px; color: var(--text-faint); }
+  .score-fill-track { width: 90px; height: 4px; background: var(--border); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .score-fill { height: 100%; background: var(--verdigris-2); border-radius: 2px; }
+
+  .steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 18px 0; font-family: var(--font-mono); font-size: 12.5px; }
+  .step { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 5px 9px; white-space: nowrap; }
+  .step .app { color: var(--text); }
+  .step .action { color: var(--text-faint); }
+  .step-arrow { color: var(--text-faint); font-size: 13px; }
+
+  .breakdown-label { font-size: 12px; color: var(--text-faint); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .breakdown-bar { display: flex; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border); }
+  .breakdown-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+  .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+  .card-footer {
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+    gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft);
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag {
+    font-size: 11.5px; color: var(--ember-3); border: 1px solid rgba(242, 169, 77, 0.25);
+    background: rgba(242, 169, 77, 0.06); border-radius: 20px; padding: 3px 10px;
+  }
+
+  .actions { display: flex; gap: 16px; font-size: 13px; }
+  .actions button, .actions .link-btn {
+    background: none; border: none; padding: 0; font-family: var(--font-display);
+    font-size: 13px; cursor: pointer; color: var(--verdigris-2);
+  }
+  .actions .reject-btn { color: var(--danger); }
+  .actions .undo-btn { color: var(--text-faint); }
+  .validated-badge { color: var(--verdigris-2); font-size: 13px; }
+  .rejected-badge { color: var(--text-faint); font-size: 13px; }
+
+  .solution {
+    margin-top: 16px; font-size: 13.5px; color: var(--text); padding: 12px 14px;
+    background: var(--surface-2); border-left: 2px solid var(--verdigris-1); border-radius: var(--radius-sm);
+  }
+  .solution b { color: var(--text); font-weight: 500; }
+
+  .empty, .error-banner {
+    border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+    padding: 28px; text-align: center; color: var(--text-muted);
+  }
+  .error-banner { border-color: var(--danger); color: var(--danger); text-align: left; margin-bottom: 24px; font-size: 13.5px; }
+
+  @media (max-width: 620px) {
+    .card-top { flex-direction: column; }
+    .score-block { text-align: left; }
+    .score-fill-track { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>Friction Miner</h1>
+      <p>Detects repetitive digital workflows from activity telemetry and estimates their automation value.</p>
+      <div class="status-line"><span class="status-dot"></span>Local instance — data never leaves this machine</div>
+    </div>
+    <div class="run-panel">
+      <button class="primary" id="runBtn">Run pipeline</button>
+      <span class="run-sub" id="runSub">Runs on sample activity data</span>
+    </div>
+  </header>
+
+  <section class="observe-panel">
+    <div class="observe-main">
+      <button class="secondary" id="observeBtn">Start observing</button>
+      <span class="observe-status" id="observeStatus">Not recording</span>
+    </div>
+    <div class="sessions-list" id="sessionsList"></div>
+  </section>
+
+  <div id="errorSlot"></div>
+
+  <section class="overview" id="overview">
+    <div class="stat"><div class="value">—</div><div class="label">Workflows mined</div></div>
+    <div class="stat"><div class="value">—</div><div class="label">Opportunities found</div></div>
+    <div class="stat"><div class="value">—</div><div class="label">Validated</div></div>
+    <div class="stat"><div class="value">—</div><div class="label">Hours recoverable / week</div></div>
+  </section>
+
+  <p class="section-heading">Detected opportunities</p>
+
+  <div class="opportunities" id="opportunities">
+    <div class="empty">Loading…</div>
+  </div>
+
+</div>
+
+<script>
+const API_BASE = 'http://localhost:8000';
+
+const FACTORS = [
+  { key: 'frequency',             label: 'Frequency',            color: 'var(--ember-1)' },
+  { key: 'time_spent',            label: 'Time cost',            color: 'var(--ember-2)' },
+  { key: 'predictability',        label: 'Predictability',       color: 'var(--ember-3)' },
+  { key: 'automation_potential',  label: 'Automation fit',       color: 'var(--verdigris-1)' },
+  { key: 'low_human_judgment',    label: 'Low judgment needed',  color: 'var(--verdigris-2)' },
+];
+
+function sentenceCase(s) {
+  const withSpaces = s.replace(/_/g, ' ');
+  return withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
+}
+
+function parseStep(step) {
+  const parts = step.split(':');
+  return { app: parts[0], action: parts.slice(1).join(':') };
+}
+
+function showError(message) {
+  document.getElementById('errorSlot').innerHTML = `<div class="error-banner">${message}</div>`;
+}
+function clearError() {
+  document.getElementById('errorSlot').innerHTML = '';
+}
+
+async function fetchJSON(path, options) {
+  const res = await fetch(API_BASE + path, options);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+  return res.json();
+}
+
+function renderOverview(data) {
+  const els = document.querySelectorAll('#overview .stat .value');
+  els[0].textContent = data.workflows_detected;
+  els[1].textContent = data.opportunities_detected;
+  els[2].textContent = data.validated_opportunities;
+  els[3].textContent = data.recoverable_hours_per_week.toFixed(1);
+}
+
+function renderBreakdown(breakdown) {
+  const available = FACTORS.filter(f => breakdown[f.key]);
+  const totalContribution = available.reduce((sum, f) => sum + breakdown[f.key].contribution, 0);
+
+  const segments = available.map(f => {
+    const contribution = breakdown[f.key].contribution;
+    const widthPct = totalContribution > 0 ? (contribution / totalContribution) * 100 : 0;
+    return `<div style="width:${widthPct}%; background:${f.color}" title="${f.label}: ${contribution.toFixed(1)} pts"></div>`;
+  }).join('');
+
+  const legend = available.map(f =>
+    `<span><span class="legend-dot" style="background:${f.color}"></span>${f.label}</span>`
+  ).join('');
+
+  return `
+    <div class="breakdown-label"><span>Score breakdown</span></div>
+    <div class="breakdown-bar">${segments}</div>
+    <div class="breakdown-legend">${legend}</div>
+  `;
+}
+
+function renderCard(o) {
+  const stepsHtml = o.steps.map((s, i) => {
+    const { app, action } = parseStep(s);
+    const arrow = i < o.steps.length - 1 ? '<span class="step-arrow">→</span>' : '';
+    return `<span class="step"><span class="app">${app}</span> <span class="action">${action}</span></span>${arrow}`;
+  }).join('');
+
+  const tagsHtml = o.friction_types.map(t => `<span class="tag">${sentenceCase(t)}</span>`).join('');
+
+  let actionsHtml = '';
+  if (o.validation_status === 'pending') {
+    actionsHtml = `
+      <button class="link-btn" onclick="validate('${o.opportunity_id}', 'accepted')">Mark as validated</button>
+      <button class="reject-btn" onclick="validate('${o.opportunity_id}', 'rejected')">Dismiss</button>
+    `;
+  } else if (o.validation_status === 'accepted') {
+    actionsHtml = `
+      <span class="validated-badge">✓ Validated</span>
+      <button class="undo-btn" onclick="validate('${o.opportunity_id}', 'pending')">Undo</button>
+    `;
+  } else if (o.validation_status === 'rejected') {
+    actionsHtml = `
+      <span class="rejected-badge">Dismissed</span>
+      <button class="undo-btn" onclick="validate('${o.opportunity_id}', 'pending')">Restore</button>
+    `;
+  }
+
+  return `
+    <div class="card status-${o.validation_status}">
+      <div class="card-top">
+        <div>
+          <h2>${o.workflow_name}</h2>
+          <p class="desc">${o.description}</p>
+        </div>
+        <div class="score-block">
+          <span class="score-value">${o.opportunity_score.toFixed(1)}</span><span class="score-max">/100</span>
+          <div class="score-fill-track"><div class="score-fill" style="width:${Math.min(o.opportunity_score, 100)}%"></div></div>
+        </div>
+      </div>
+      <div class="steps">${stepsHtml}</div>
+      ${renderBreakdown(o.score_breakdown)}
+      <div class="solution"><b>Suggested approach —</b> ${o.recommended_solution}</div>
+      <div class="card-footer">
+        <div class="tags">${tagsHtml}</div>
+        <div class="actions">${actionsHtml}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderOpportunities(list) {
+  const container = document.getElementById('opportunities');
+  if (list.length === 0) {
+    container.innerHTML = `<div class="empty">No opportunities discovered yet. Run the pipeline to mine your activity data.</div>`;
+    return;
+  }
+  container.innerHTML = list.map((o, i) => {
+    const html = renderCard(o);
+    return html.replace('class="card', `style="animation-delay:${i * 60}ms" class="card`);
+  }).join('');
+}
+
+async function loadAll() {
+  try {
+    const [overview, opportunities] = await Promise.all([
+      fetchJSON('/api/overview'),
+      fetchJSON('/api/opportunities'),
+    ]);
+    clearError();
+    renderOverview(overview);
+    renderOpportunities(opportunities);
+  } catch (err) {
+    showError(`Can't reach the Friction Miner API — make sure the backend is running on localhost:8000. (${err.message})`);
+    document.getElementById('opportunities').innerHTML = '';
+  }
+}
+
+async function validate(id, status) {
+  try {
+    await fetchJSON(`/api/opportunities/${id}/validate`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    loadAll();
+  } catch (err) {
+    showError(`Couldn't update that opportunity. (${err.message})`);
+  }
+}
+
+async function runPipeline() {
+  const btn = document.getElementById('runBtn');
+  const sub = document.getElementById('runSub');
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  sub.textContent = 'Mining patterns and calling the LLM — this can take a few seconds';
+
+  try {
+    const result = await fetchJSON('/api/run-pipeline', { method: 'POST' });
+    sub.textContent = `Processed ${result.workflows_processed} workflow(s), saved ${result.opportunities_saved} opportunity(ies)`;
+    await loadAll();
+  } catch (err) {
+    showError(`Pipeline run failed. (${err.message})`);
+    sub.textContent = 'Runs on sample activity data';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run pipeline';
+  }
+}
+
+let collectorTimer = null;
+let collectorStartedAt = null;
+
+function formatElapsed(startedAtIso) {
+  const seconds = Math.floor((Date.now() - new Date(startedAtIso).getTime()) / 1000);
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+function formatRelativeTime(iso) {
+  const diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  return `${Math.floor(diffMin / 60)}h ago`;
+}
+
+function formatDuration(startedIso, endedIso) {
+  const seconds = Math.floor((new Date(endedIso) - new Date(startedIso)) / 1000);
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+function setObserveUI(running, startedAt) {
+  const btn = document.getElementById('observeBtn');
+  const status = document.getElementById('observeStatus');
+
+  if (collectorTimer) { clearInterval(collectorTimer); collectorTimer = null; }
+
+  if (running) {
+    btn.textContent = 'Stop observing';
+    btn.classList.add('recording');
+    collectorStartedAt = startedAt;
+    const tick = () => { status.innerHTML = `<span class="rec-dot"></span>Recording — ${formatElapsed(collectorStartedAt)}`; };
+    tick();
+    collectorTimer = setInterval(tick, 1000);
+  } else {
+    btn.textContent = 'Start observing';
+    btn.classList.remove('recording');
+    status.textContent = 'Not recording';
+  }
+}
+
+async function refreshCollectorStatus() {
+  try {
+    const data = await fetchJSON('/api/collector/status');
+    setObserveUI(data.running, data.started_at);
+  } catch (err) { /* surfaced by loadAll's error banner */ }
+}
+
+async function loadSessions() {
+  try {
+    const sessions = await fetchJSON('/api/sessions');
+    const list = document.getElementById('sessionsList');
+    if (sessions.length === 0) {
+      list.textContent = 'No observation sessions yet.';
+      return;
+    }
+    list.innerHTML = sessions.slice(0, 5).map(s => {
+      const when = formatRelativeTime(s.started_at);
+      const dur = s.ended_at ? formatDuration(s.started_at, s.ended_at) : 'in progress';
+      return `<span>${when} · ${dur} · ${s.event_count} events</span>`;
+    }).join('');
+  } catch (err) { /* handled elsewhere */ }
+}
+
+async function toggleObserve() {
+  const btn = document.getElementById('observeBtn');
+  btn.disabled = true;
+  try {
+    const isRecording = btn.classList.contains('recording');
+    if (isRecording) {
+      await fetchJSON('/api/collector/stop', { method: 'POST' });
+    } else {
+      await fetchJSON('/api/collector/start', { method: 'POST' });
+    }
+    await refreshCollectorStatus();
+    await loadSessions();
+  } catch (err) {
+    showError(`Couldn't toggle observation. (${err.message})`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('runBtn').addEventListener('click', runPipeline);
+document.getElementById('observeBtn').addEventListener('click', toggleObserve);
+
+loadAll();
+refreshCollectorStatus();
+loadSessions();
+</script>
+
+</body>
+</html>

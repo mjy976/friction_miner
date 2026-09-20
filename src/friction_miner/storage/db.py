@@ -1,32 +1,22 @@
 """
-SQLite Event Store — Phase 4
+SQLite Event Store — Phase 4 (+ session_id in v0.3)
 
 Responsible ONLY for persisting and retrieving Event objects.
-Does not know or care where events came from (synthetic generator,
-real collector, etc.) — that separation is intentional (Modularity
-principle).
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 from friction_miner.events.schema import Event, EventType, EventSource
-
-DEFAULT_DB_PATH = Path("data/friction_miner.db")
-
-
-def _get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(db_path)
+from friction_miner.storage.connection import get_connection, ensure_column, DEFAULT_DB_PATH
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -34,6 +24,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
                 event_id TEXT PRIMARY KEY,
                 schema_version TEXT NOT NULL,
                 source TEXT NOT NULL,
+                session_id TEXT,
                 timestamp TEXT NOT NULL,
                 application TEXT NOT NULL,
                 event_type TEXT NOT NULL,
@@ -45,26 +36,29 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        # Idempotent migration for databases created before session_id existed.
+        ensure_column(conn, "events", "session_id", "TEXT")
         conn.commit()
     finally:
         conn.close()
 
 
 def save_events(events: List[Event], db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
         conn.executemany(
             """
             INSERT OR IGNORE INTO events (
-                event_id, schema_version, source, timestamp, application,
+                event_id, schema_version, source, session_id, timestamp, application,
                 event_type, window, duration, transfer_source, transfer_destination, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     e.event_id,
                     e.schema_version,
                     e.source.value,
+                    e.session_id,
                     e.timestamp.isoformat(),
                     e.application,
                     e.event_type.value,
@@ -86,10 +80,15 @@ def load_events(
     db_path: Path = DEFAULT_DB_PATH,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
+    session_id: Optional[str] = None,
 ) -> List[Event]:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
-        query = "SELECT * FROM events"
+        query = (
+            "SELECT event_id, schema_version, source, session_id, timestamp, application, "
+            "event_type, window, duration, transfer_source, transfer_destination, metadata "
+            "FROM events"
+        )
         conditions = []
         params: list = []
 
@@ -99,6 +98,9 @@ def load_events(
         if end is not None:
             conditions.append("timestamp <= ?")
             params.append(end.isoformat())
+        if session_id is not None:
+            conditions.append("session_id = ?")
+            params.append(session_id)
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -110,7 +112,7 @@ def load_events(
         events = []
         for row in rows:
             (
-                event_id, schema_version, source, timestamp, application,
+                event_id, schema_version, source, session_id_val, timestamp, application,
                 event_type, window, duration, transfer_source, transfer_destination, metadata,
             ) = row
             events.append(
@@ -118,6 +120,7 @@ def load_events(
                     event_id=event_id,
                     schema_version=schema_version,
                     source=EventSource(source),
+                    session_id=session_id_val,
                     timestamp=datetime.fromisoformat(timestamp),
                     application=application,
                     event_type=EventType(event_type),
@@ -134,7 +137,7 @@ def load_events(
 
 
 def count_events(db_path: Path = DEFAULT_DB_PATH) -> int:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
         cursor = conn.execute("SELECT COUNT(*) FROM events")
         return cursor.fetchone()[0]

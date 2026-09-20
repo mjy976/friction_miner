@@ -1,23 +1,23 @@
 """
-FastAPI Backend — Phase 14b
+FastAPI Backend — Phase 14b (+ collector control, Productize Phase A)
 
 Thin HTTP layer over the existing pipeline modules. Contains NO
-business logic itself — every endpoint just calls into modules
-already built and tested in Phases 8-14a (Modularity principle,
-Master Instruction section 23). This keeps the API a pure adapter:
-if the underlying pipeline changes, the API barely has to.
+business logic itself.
 """
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from friction_miner.storage.db import load_events
+from friction_miner.storage.db import load_events, init_db
 from friction_miner.mining.sequence_miner import mine_patterns
 from friction_miner.workflow.reconstructor import reconstruct_workflows, filter_meaningful_workflows
 from friction_miner.llm.analyzer import analyze_workflow
@@ -29,16 +29,23 @@ from friction_miner.opportunities.store import (
     load_opportunities,
     update_validation_status,
 )
+from friction_miner.sessions.models import ObservationSession
+from friction_miner.sessions.store import (
+    init_sessions_db,
+    create_session,
+    end_session,
+    list_sessions,
+    get_active_session,
+    count_events_for_session,
+)
 
 APP_DB_PATH = Path("data/friction_miner.db")
 SYNTHETIC_DB_PATH = Path("data/synthetic_events.db")
+COLLECTOR_STOP_FILE = Path("data/.collector_stop_signal")
+COLLECTOR_LOG_PATH = Path("data/.collector_log.txt")
 
 app = FastAPI(title="Friction Miner API")
 
-# Dashboard runs as a local static file (opened via file:// or a
-# separate dev server), so CORS must allow it. Fine for a local
-# single-user prototype (Master Instruction, section 4) — would need
-# tightening for any real multi-user deployment.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,6 +54,14 @@ app.add_middleware(
 )
 
 init_opportunities_db(APP_DB_PATH)
+init_sessions_db(APP_DB_PATH)
+
+# In-memory handle to the currently running collector subprocess.
+# Single-user, single active session at a time. Known limitation:
+# resets if the API process restarts — run uvicorn WITHOUT --reload
+# during real observation/demo use.
+_collector_process: Optional[subprocess.Popen] = None
+_collector_session_id: Optional[str] = None
 
 
 class ValidationUpdateRequest(BaseModel):
@@ -85,10 +100,9 @@ def validate_opportunity(opportunity_id: str, body: ValidationUpdateRequest) -> 
 
 @app.post("/api/run-pipeline")
 def run_pipeline() -> dict:
-    """Runs the full deterministic + LLM pipeline on the synthetic
-    dataset and persists results. Exists so the dashboard can trigger
-    a live end-to-end run during a demo, rather than only showing
-    pre-computed data."""
+    """Runs the full pipeline on the synthetic demo dataset. Switching
+    this to real accumulated telemetry is the next phase."""
+    init_db(SYNTHETIC_DB_PATH)  # ensures schema migrations (e.g. session_id) are applied
     events = load_events(SYNTHETIC_DB_PATH)
     patterns = mine_patterns(events, min_n=2, max_n=6, min_frequency=3)
     workflows = filter_meaningful_workflows(reconstruct_workflows(patterns))
@@ -102,3 +116,75 @@ def run_pipeline() -> dict:
         saved_count += 1
 
     return {"workflows_processed": len(workflows), "opportunities_saved": saved_count}
+
+
+@app.get("/api/collector/status")
+def collector_status() -> dict:
+    global _collector_process
+    running = _collector_process is not None and _collector_process.poll() is None
+    if not running:
+        _collector_process = None
+
+    active = get_active_session(APP_DB_PATH) if running else None
+    return {
+        "running": running,
+        "session_id": active.session_id if active else None,
+        "started_at": active.started_at.isoformat() if active else None,
+    }
+
+
+@app.post("/api/collector/start")
+def collector_start() -> dict:
+    global _collector_process, _collector_session_id
+
+    if _collector_process is not None and _collector_process.poll() is None:
+        raise HTTPException(status_code=409, detail="Collector is already running")
+
+    if COLLECTOR_STOP_FILE.exists():
+        COLLECTOR_STOP_FILE.unlink()
+
+    session = ObservationSession(session_id=str(uuid.uuid4()))
+    create_session(session, APP_DB_PATH)
+
+    log_file = open(COLLECTOR_LOG_PATH, "w", encoding="utf-8")
+    creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    _collector_process = subprocess.Popen(
+        [sys.executable, "-m", "friction_miner.collector.main_collector",
+         session.session_id, str(COLLECTOR_STOP_FILE)],
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        creationflags=creation_flags,
+    )
+    log_file.close()  # child has its own handle now; safe to close ours
+    _collector_session_id = session.session_id
+
+    return {"session_id": session.session_id, "started_at": session.started_at.isoformat()}
+
+
+@app.post("/api/collector/stop")
+def collector_stop() -> dict:
+    global _collector_process, _collector_session_id
+
+    if _collector_process is None or _collector_process.poll() is not None:
+        raise HTTPException(status_code=409, detail="Collector is not running")
+
+    COLLECTOR_STOP_FILE.touch()
+
+    try:
+        _collector_process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _collector_process.terminate()
+
+    event_count = count_events_for_session(_collector_session_id, APP_DB_PATH)
+    end_session(_collector_session_id, event_count, APP_DB_PATH)
+
+    stopped_session_id = _collector_session_id
+    _collector_process = None
+    _collector_session_id = None
+
+    return {"session_id": stopped_session_id, "event_count": event_count}
+
+
+@app.get("/api/sessions", response_model=List[ObservationSession])
+def get_sessions() -> List[ObservationSession]:
+    return list_sessions(APP_DB_PATH)

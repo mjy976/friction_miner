@@ -1,33 +1,20 @@
 """
 Opportunity Store — Phase 14a
-
-Persists computed automation opportunities so the dashboard can avoid
-re-calling the LLM on every page load, track user validation
-decisions over time, and compute overview stats from a stable,
-queryable source — rather than recomputing everything (including a
-non-deterministic LLM call) on every request.
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from friction_miner.opportunities.models import Opportunity, ValidationStatus
-
-DEFAULT_DB_PATH = Path("data/friction_miner.db")
-
-
-def _get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(db_path)
+from friction_miner.storage.connection import get_connection, DEFAULT_DB_PATH
 
 
 def init_opportunities_db(db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -60,7 +47,7 @@ def init_opportunities_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 
 
 def save_opportunity(opportunity: Opportunity, db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -101,9 +88,16 @@ def save_opportunity(opportunity: Opportunity, db_path: Path = DEFAULT_DB_PATH) 
 
 
 def load_opportunities(db_path: Path = DEFAULT_DB_PATH) -> List[Opportunity]:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
-        cursor = conn.execute("SELECT * FROM opportunities ORDER BY opportunity_score DESC")
+        cursor = conn.execute(
+            "SELECT opportunity_id, created_at, steps, frequency, avg_duration_seconds, "
+            "frequency_per_week, time_spent_hours_per_week, predictability, workflow_name, "
+            "description, friction_types, automation_potential, confidence, "
+            "human_judgment_required, recommended_solution, estimated_automation_level, "
+            "opportunity_score, score_breakdown, validation_status "
+            "FROM opportunities ORDER BY opportunity_score DESC"
+        )
         rows = cursor.fetchall()
         results = []
         for row in rows:
@@ -146,7 +140,7 @@ def update_validation_status(
     status: ValidationStatus,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> None:
-    conn = _get_connection(db_path)
+    conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE opportunities SET validation_status = ? WHERE opportunity_id = ?",
