@@ -84,6 +84,15 @@
 
   .run-sub { display: block; margin-top: 8px; font-size: 12px; color: var(--text-faint); min-height: 16px; }
 
+  .source-toggle {
+    display: block;
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+  .source-toggle input { margin-right: 6px; vertical-align: middle; }
+
   /* Observe panel */
   .observe-panel {
     display: flex;
@@ -216,7 +225,11 @@
     </div>
     <div class="run-panel">
       <button class="primary" id="runBtn">Run pipeline</button>
-      <span class="run-sub" id="runSub">Runs on sample activity data</span>
+      <label class="source-toggle">
+        <input type="checkbox" id="sourceToggle" />
+        Use sample data instead of my activity
+      </label>
+      <span class="run-sub" id="runSub">Mines your accumulated activity data</span>
     </div>
   </header>
 
@@ -276,8 +289,12 @@ function clearError() {
 async function fetchJSON(path, options) {
   const res = await fetch(API_BASE + path, options);
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body.detail) message = body.detail;
+    } catch (_) { /* body wasn't JSON — keep the generic message */ }
+    throw new Error(message);
   }
   return res.json();
 }
@@ -404,17 +421,25 @@ async function validate(id, status) {
 async function runPipeline() {
   const btn = document.getElementById('runBtn');
   const sub = document.getElementById('runSub');
+  const useSynthetic = document.getElementById('sourceToggle').checked;
+  const source = useSynthetic ? 'synthetic' : 'real';
+
   btn.disabled = true;
   btn.textContent = 'Running…';
   sub.textContent = 'Mining patterns and calling the LLM — this can take a few seconds';
 
   try {
-    const result = await fetchJSON('/api/run-pipeline', { method: 'POST' });
-    sub.textContent = `Processed ${result.workflows_processed} workflow(s), saved ${result.opportunities_saved} opportunity(ies)`;
+    const result = await fetchJSON('/api/run-pipeline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
+    sub.textContent = `Scanned ${result.events_scanned} events, found ${result.workflows_processed} workflow(s), saved ${result.opportunities_saved}`;
+    clearError();
     await loadAll();
   } catch (err) {
-    showError(`Pipeline run failed. (${err.message})`);
-    sub.textContent = 'Runs on sample activity data';
+    showError(err.message);
+    sub.textContent = 'Mines your accumulated activity data';
   } finally {
     btn.disabled = false;
     btn.textContent = 'Run pipeline';

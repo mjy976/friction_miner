@@ -1,8 +1,9 @@
 """
-FastAPI Backend — Phase 14b (+ collector control, Productize Phase A)
+FastAPI Backend — Phase 14b (+ collector control, dual-source pipeline)
 
 Thin HTTP layer over the existing pipeline modules. Contains NO
-business logic itself.
+business logic itself — every endpoint just calls into modules
+already built and tested in Phases 8-14a.
 """
 
 from __future__ import annotations
@@ -68,6 +69,10 @@ class ValidationUpdateRequest(BaseModel):
     status: ValidationStatus
 
 
+class RunPipelineRequest(BaseModel):
+    source: str = "real"  # "real" (accumulated collector data) or "synthetic" (demo dataset)
+
+
 @app.get("/api/opportunities", response_model=List[Opportunity])
 def get_opportunities() -> List[Opportunity]:
     return load_opportunities(APP_DB_PATH)
@@ -99,13 +104,37 @@ def validate_opportunity(opportunity_id: str, body: ValidationUpdateRequest) -> 
 
 
 @app.post("/api/run-pipeline")
-def run_pipeline() -> dict:
-    """Runs the full pipeline on the synthetic demo dataset. Switching
-    this to real accumulated telemetry is the next phase."""
-    init_db(SYNTHETIC_DB_PATH)  # ensures schema migrations (e.g. session_id) are applied
-    events = load_events(SYNTHETIC_DB_PATH)
+def run_pipeline(body: RunPipelineRequest = RunPipelineRequest()) -> dict:
+    """Runs the full deterministic + LLM pipeline.
+
+    source="real": mines ALL accumulated real telemetry across every
+    observation session to date.
+    source="synthetic": always finds the same demo workflow, useful
+    when real data is too sparse to have a meaningful pattern yet.
+    """
+    db_path = APP_DB_PATH if body.source == "real" else SYNTHETIC_DB_PATH
+    init_db(db_path)
+    events = load_events(db_path)
+
+    if body.source == "real" and len(events) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="No real activity data yet — use 'Start observing' to collect some first.",
+        )
+
     patterns = mine_patterns(events, min_n=2, max_n=6, min_frequency=3)
     workflows = filter_meaningful_workflows(reconstruct_workflows(patterns))
+
+    if body.source == "real" and len(workflows) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Mined {len(events)} real events but found no repeated cross-app "
+                "workflow yet. Automation opportunities need the SAME sequence to "
+                "recur several times — try a longer observation session, or use "
+                "the sample dataset to see the pipeline end-to-end."
+            ),
+        )
 
     saved_count = 0
     for workflow in workflows:
@@ -115,7 +144,12 @@ def run_pipeline() -> dict:
         save_opportunity(opportunity, APP_DB_PATH)
         saved_count += 1
 
-    return {"workflows_processed": len(workflows), "opportunities_saved": saved_count}
+    return {
+        "source": body.source,
+        "events_scanned": len(events),
+        "workflows_processed": len(workflows),
+        "opportunities_saved": saved_count,
+    }
 
 
 @app.get("/api/collector/status")
@@ -155,7 +189,7 @@ def collector_start() -> dict:
         stderr=subprocess.STDOUT,
         creationflags=creation_flags,
     )
-    log_file.close()  # child has its own handle now; safe to close ours
+    log_file.close()
     _collector_session_id = session.session_id
 
     return {"session_id": session.session_id, "started_at": session.started_at.isoformat()}

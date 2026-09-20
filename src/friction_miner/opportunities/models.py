@@ -11,6 +11,7 @@ dashboard (Master Instruction, section 15).
 from __future__ import annotations
 
 import uuid
+import hashlib
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List
@@ -68,7 +69,9 @@ class Opportunity(BaseModel):
         """Builds an Opportunity by combining the three pipeline
         stages' outputs — keeps assembly logic in one place instead
         of duplicating it wherever the pipeline is run."""
+        stable_id = hashlib.sha256("->".join(workflow.steps).encode()).hexdigest()[:16]
         return cls(
+            opportunity_id=stable_id,
             steps=list(workflow.steps),
             frequency=workflow.frequency,
             avg_duration_seconds=workflow.avg_duration_seconds,

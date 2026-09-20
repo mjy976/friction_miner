@@ -1,5 +1,17 @@
 """
-Opportunity Store — Phase 14a
+Opportunity Store — Phase 14a (+ merge-on-rerun in Phase B)
+
+Persists computed automation opportunities so the dashboard can avoid
+re-calling the LLM on every page load, track user validation
+decisions over time, and compute overview stats from a stable,
+queryable source.
+
+Phase B addition: since Opportunity.opportunity_id is now derived
+deterministically from the workflow's step sequence (see
+opportunities/models.py), re-running the pipeline on a workflow that
+was already saved must UPDATE that record rather than create a
+duplicate — and must preserve whatever validation decision the user
+already made, rather than resetting it to pending.
 """
 
 from __future__ import annotations
@@ -7,7 +19,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from friction_miner.opportunities.models import Opportunity, ValidationStatus
 from friction_miner.storage.connection import get_connection, DEFAULT_DB_PATH
@@ -46,7 +58,30 @@ def init_opportunities_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         conn.close()
 
 
+def _get_existing_validation_status(
+    opportunity_id: str, db_path: Path
+) -> Optional[ValidationStatus]:
+    """Checks whether this exact workflow (by its stable id) was
+    already saved, and if so, returns its current validation status —
+    so a re-run of the pipeline updates the evidence/score without
+    silently discarding a decision the user already made."""
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT validation_status FROM opportunities WHERE opportunity_id = ?",
+            (opportunity_id,),
+        )
+        row = cursor.fetchone()
+        return ValidationStatus(row[0]) if row else None
+    finally:
+        conn.close()
+
+
 def save_opportunity(opportunity: Opportunity, db_path: Path = DEFAULT_DB_PATH) -> None:
+    existing_status = _get_existing_validation_status(opportunity.opportunity_id, db_path)
+    if existing_status is not None:
+        opportunity.validation_status = existing_status
+
     conn = get_connection(db_path)
     try:
         conn.execute(
